@@ -1,0 +1,5 @@
+#!/bin/bash -x
+
+cat login.ini
+
+./main.py login.ini  --surf --surf-amount 11 --stay-up
