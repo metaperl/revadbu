@@ -9,6 +9,7 @@ from functools import wraps
 import logging
 import pprint
 import random
+import re
 import time
 import ConfigParser
 
@@ -17,6 +18,7 @@ import argh
 
 from clint.textui import progress
 import funcy
+import html2text
 from PIL import Image
 from splinter import Browser
 from selenium.webdriver.common.action_chains import ActionChains
@@ -43,7 +45,7 @@ base_url = 'http://www.RevAdBurst.com/'
 action_path = dict(
     login='login.php',
     view_ads='viewads.php',
-    dashboard='Dot_MembersPage.asp',
+    dashboard='dashboard.php',
     withdraw='DotwithdrawForm.asp',
     buy_pack='members/sales/packages'
 )
@@ -149,6 +151,9 @@ def trap_alert(func):
 def get_element_html(driver, elem):
     return driver.execute_script("return arguments[0].innerHTML;", elem)
 
+def get_outer_html(driver, elem):
+    return driver.execute_script("return arguments[0].outerHTML;", elem)
+
 
 def echo_print(text, elem):
     print("{0}={1}.".format(text, elem))
@@ -202,6 +207,18 @@ class Entry(object):
 
         self.browser.find_by_xpath("//input[@value='LOGIN']").click()
 
+        self.collect_stats()
+
+    def collect_stats(self):
+        main_account_balance_elem = self.browser.find_by_xpath("//p[@style='font-size:41px;']")
+        main_account_balance = float(main_account_balance_elem.text[1:])
+        account_balance_elem = self.browser.find_by_xpath("//div[@class='account-blance']")
+        account_balance_html = get_outer_html(self.browser.driver, account_balance_elem._element)
+        account_balance_text = html2text.HTML2Text().handle(account_balance_html)
+        floating_point_regexp = re.compile('\d+\.\d+')
+        main, purchase, repurchase = floating_point_regexp.findall(s)
+        self._balance = dict(main=main, purchase=purchase, repurchase=repurchase)
+        pass
 
     def browser_visit(self, action_label):
         try:
@@ -235,6 +252,7 @@ class Entry(object):
         print(ads)
         ads[3].click()
         self.browser.driver.switch_to_window(self.browser.driver.window_handles[-1])
+        time.sleep(30)
         elem = wait_visible(self.browser.driver, '//a[text()="Close"]')
         elem.click()
         self.browser.driver.switch_to_window(self.browser.driver.window_handles[0])
