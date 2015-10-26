@@ -46,8 +46,9 @@ action_path = dict(
     login='login.php',
     view_ads='viewads.php',
     dashboard='dashboard.php',
-    withdraw='DotwithdrawForm.asp',
-    buy_pack='members/sales/packages'
+    repurchase_balance_transfer='balance_transfer.php',
+    purchase_balance_transfer='pbalance_transfer.php',
+    buy_pack='purchase.php'
 )
 
 one_minute = 60
@@ -207,18 +208,35 @@ class Entry(object):
 
         self.browser.find_by_xpath("//input[@value='LOGIN']").click()
 
+        link_elem = wait_visible(self.browser.driver, "//div[@class='closeButton']", timeout=15)
+        if link_elem:
+            link_elem.click()
+
         self.collect_stats()
 
     def collect_stats(self):
+        self.browser_visit('dashboard')
         main_account_balance_elem = self.browser.find_by_xpath("//p[@style='font-size:41px;']")
         main_account_balance = float(main_account_balance_elem.text[1:])
         account_balance_elem = self.browser.find_by_xpath("//div[@class='account-blance']")
         account_balance_html = get_outer_html(self.browser.driver, account_balance_elem._element)
         account_balance_text = html2text.HTML2Text().handle(account_balance_html)
         floating_point_regexp = re.compile('\d+\.\d+')
-        main, purchase, repurchase = floating_point_regexp.findall(s)
+        main, purchase, repurchase = [float(f) for f in floating_point_regexp.findall(account_balance_text)]
         self._balance = dict(main=main, purchase=purchase, repurchase=repurchase)
-        pass
+        pp = pprint.PrettyPrinter(indent=4)
+        pp.pprint(self._balance)
+
+    def optimize_balance(self):
+        print("Optimizing balance...")
+        if self._balance['main'] < 1:
+            print("main balance less than 1. no xfer")
+            return
+        self.browser_visit('dashboard')
+        self.browser.find_by_xpath("//div[@class='account-blance']/a[1]").click()
+        self.browser.find_by_name("amount").type(str(self._balance['main']))
+        self.browser.find_by_xpath('//input[@class="btn"]').click()
+        self.collect_stats()
 
     def browser_visit(self, action_label):
         try:
@@ -245,6 +263,8 @@ class Entry(object):
                 if result == 0:
                     break
 
+        self.browser_visit('dashboard')
+
     @trap_alert
     def view_ad(self):
 
@@ -253,6 +273,7 @@ class Entry(object):
         ads[3].click()
         self.browser.driver.switch_to_window(self.browser.driver.window_handles[-1])
         time.sleep(30)
+        time.sleep(random.randrange(5,10))
         elem = wait_visible(self.browser.driver, '//a[text()="Close"]')
         elem.click()
         self.browser.driver.switch_to_window(self.browser.driver.window_handles[0])
@@ -265,10 +286,30 @@ class Entry(object):
             time.sleep(1)
 
     def buy_pack(self):
+        self.optimize_balance()
+
+        if self._balance['repurchase'] < 1:
+            print("Repurchase balance < 1. Cannot buy packs.")
+            return
+
         self.browser_visit('buy_pack')
-        self.browser.find_by_name('qty[18]').first.type("1")
-        self.browser.select('processor[18]', "4")  # Solid Trust Pay for the win
-        self.browser.execute_script("buy_sales_package(18)")
+
+        value_to_option = {
+            1 : 2,
+            2: 3,
+            3: 4,
+            6: 5,
+            10:6,
+            20:7,
+            40:8,
+            50:9
+            }
+        for k, v in value_to_option.iteritems():
+            value_to_option[k] = str(v)
+
+        self.browser.select('packtype', value_to_option[1])
+        self.browser.select('paymentmethod', "10")  # repurchase balance
+        self.browser.find_by_class('btn').click()
         with self.browser.get_alert() as alert:
             alert.accept()
 
@@ -322,7 +363,7 @@ class Entry(object):
         button.click()
 
 
-def main(conf, surf=False, buy_pack=False, stay_up=False, surf_amount=12):
+def main(conf, surf=False, buy_pack=False, stay_up=False, surf_amount=10):
     config = ConfigParser.ConfigParser()
     config.read(conf)
     username = config.get('login', 'username')
