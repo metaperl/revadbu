@@ -7,6 +7,7 @@ from __future__ import print_function
 import collections
 from functools import wraps
 import logging
+import math
 import pprint
 import random
 import re
@@ -234,7 +235,7 @@ class Entry(object):
             return
         self.browser_visit('dashboard')
         self.browser.find_by_xpath("//div[@class='account-blance']/a[1]").click()
-        self.browser.find_by_name("amount").type(str(self._balance['main']))
+        self.browser.find_by_name("amount").type(str(math.floor(self._balance['main'])))
         self.browser.find_by_xpath('//input[@class="btn"]').click()
         self.collect_stats()
 
@@ -294,24 +295,31 @@ class Entry(object):
 
         self.browser_visit('buy_pack')
 
-        value_to_option = {
-            1 : 2,
+        pack_value_to_option = {
+            1: 2,
             2: 3,
             3: 4,
             6: 5,
-            10:6,
-            20:7,
-            40:8,
-            50:9
-            }
-        for k, v in value_to_option.iteritems():
-            value_to_option[k] = str(v)
+            10: 6,
+            20: 7,
+            40: 8,
+            50: 9
+        }
+        for k, v in pack_value_to_option.iteritems():
+            pack_value_to_option[k] = str(v)
 
-        self.browser.select('packtype', value_to_option[1])
+        pp.pprint(pack_value_to_option)
+
+        pack_value = 1
+
+        packs_to_buy = int(math.floor(self._balance['repurchase'] / pack_value))
+
+        self.browser.find_by_name('amount').type(str(packs_to_buy))
+        self.browser.select('packtype', pack_value_to_option[pack_value])
         self.browser.select('paymentmethod', "10")  # repurchase balance
-        self.browser.find_by_class('btn').click()
-        with self.browser.get_alert() as alert:
-            alert.accept()
+
+        self.browser.find_by_xpath("//*[@class='btn']").click()
+        pass
 
     def calc_account_balance(self):
         time.sleep(1)
