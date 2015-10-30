@@ -5,6 +5,9 @@ from __future__ import print_function
 
 # Core
 import collections
+from decimal import *
+getcontext().prec = 2
+getcontext().rounding = ROUND_DOWN
 from functools import wraps
 import logging
 import math
@@ -161,6 +164,12 @@ def echo_print(text, elem):
     print("{0}={1}.".format(text, elem))
 
 
+import inspect
+def retrieve_name(var):
+    callers_local_vars = inspect.currentframe().f_back.f_locals.items()
+    return [var_name for var_name, var_val in callers_local_vars if var_val is var]
+
+
 # https://stackoverflow.com/questions/10848900/how-to-take-partial-screenshot-frame-with-selenium-webdriver/26225137#26225137?newreg=8807b51813c4419abbb37ab2fe696b1a
 
 
@@ -209,35 +218,16 @@ class Entry(object):
 
         self.browser.find_by_xpath("//input[@value='LOGIN']").click()
 
+
+        print("Waiting for login ad...")
         link_elem = wait_visible(self.browser.driver, "//div[@class='closeButton']", timeout=15)
+        print("link elem={0}".format(link_elem))
         if link_elem:
+            time.sleep(3)
             link_elem.click()
 
         self.collect_stats()
 
-    def collect_stats(self):
-        self.browser_visit('dashboard')
-        main_account_balance_elem = self.browser.find_by_xpath("//p[@style='font-size:41px;']")
-        main_account_balance = float(main_account_balance_elem.text[1:])
-        account_balance_elem = self.browser.find_by_xpath("//div[@class='account-blance']")
-        account_balance_html = get_outer_html(self.browser.driver, account_balance_elem._element)
-        account_balance_text = html2text.HTML2Text().handle(account_balance_html)
-        floating_point_regexp = re.compile('\d+\.\d+')
-        main, purchase, repurchase = [float(f) for f in floating_point_regexp.findall(account_balance_text)]
-        self._balance = dict(main=main, purchase=purchase, repurchase=repurchase)
-        pp = pprint.PrettyPrinter(indent=4)
-        pp.pprint(self._balance)
-
-    def optimize_balance(self):
-        print("Optimizing balance...")
-        if self._balance['main'] < 1:
-            print("main balance less than 1. no xfer")
-            return
-        self.browser_visit('dashboard')
-        self.browser.find_by_xpath("//div[@class='account-blance']/a[1]").click()
-        self.browser.find_by_name("amount").type(str(math.floor(self._balance['main'])))
-        self.browser.find_by_xpath('//input[@class="btn"]').click()
-        self.collect_stats()
 
     def browser_visit(self, action_label):
         try:
@@ -286,14 +276,59 @@ class Entry(object):
         for _ in progress.bar(range(time_to_wait_on_ad)):
             time.sleep(1)
 
-    def buy_pack(self):
-        self.optimize_balance()
+    def collect_stats(self):
+        self.browser_visit('dashboard')
+        main_account_balance_elem = self.browser.find_by_xpath("//p[@style='font-size:41px;']")
+        main_account_balance = Decimal(main_account_balance_elem.text[1:])
+        account_balance_elem = self.browser.find_by_xpath("//div[@class='account-blance']")
+        account_balance_html = get_outer_html(self.browser.driver, account_balance_elem._element)
+        account_balance_text = html2text.HTML2Text().handle(account_balance_html)
+        floating_point_regexp = re.compile('\d+\.\d+')
+        main, purchase, repurchase = [Decimal(f) for f in floating_point_regexp.findall(account_balance_text)]
+        self._balance = dict(
+            main=main, purchase=purchase, repurchase=repurchase,
+        )
+        pp = pprint.PrettyPrinter(indent=4)
+        pp.pprint(self._balance)
 
-        if self._balance['repurchase'] < 1:
-            print("Repurchase balance < 1. Cannot buy packs.")
+    @staticmethod
+    def packs_to_purchase(bread, pack_value):
+        return int(math.floor(bread/pack_value))
+
+    def optimize_balance(self, pack_value):
+        print("Optimizing balance...")
+        if self._balance['main'] < 1:
+            print("main balance less than 1. no xfer")
             return
 
-        self.browser_visit('buy_pack')
+        if self._balance['repurchase'] > self._balance['purchase']:
+            i = 1
+        else:
+            i = 0
+
+        self.browser_visit('dashboard')
+        repurchase_balance_elem, purchase_balance_elem = self.browser.find_by_xpath("//div[@class='account-blance']/a")
+
+        packs_via_repurchase = (
+            self.packs_to_purchase(self._balance['repurchase'] + self._balance['main'], pack_value) +
+            self.packs_to_purchase(self._balance['purchase'], pack_value))
+        packs_via_purchase = (
+            self.packs_to_purchase(self._balance['purchase'] + self._balance['main'], pack_value) +
+            self.packs_to_purchase(self._balance['repurchase'], pack_value))
+
+        if packs_via_repurchase > packs_via_purchase:
+            repurchase_balance_elem.click()
+        else:
+            purchase_balance_elem.click()
+
+        self.browser.find_by_name("amount").type(
+            self._balance['main'][0:-1]
+        )
+        self.browser.find_by_xpath('//input[@class="btn"]').click()
+        self.collect_stats()
+
+    def buy_pack(self, pack_value=2):
+        self.optimize_balance(pack_value)
 
         pack_value_to_option = {
             1: 2,
@@ -310,16 +345,24 @@ class Entry(object):
 
         pp.pprint(pack_value_to_option)
 
-        pack_value = 1
+        for balance_type in 'purchase repurchase'.split():
 
-        packs_to_buy = int(math.floor(self._balance['repurchase'] / pack_value))
+            if self._balance[balance_type] < pack_value:
+                print("{0} balance of {1} < {2} Cannot buy packs.".format(
+                    balance_type, self._balance[balance_type], pack_value
+                ))
+                continue
 
-        self.browser.find_by_name('amount').type(str(packs_to_buy))
-        self.browser.select('packtype', pack_value_to_option[pack_value])
-        self.browser.select('paymentmethod', "10")  # repurchase balance
+            packs_to_buy = self.packs_to_purchase(self._balance[balance_type], pack_value)
 
-        self.browser.find_by_xpath("//*[@class='btn']").click()
-        pass
+            self.browser_visit('buy_pack')
+            self.browser.find_by_name('amount').type(str(packs_to_buy))
+            self.browser.select('packtype', pack_value_to_option[pack_value])
+            self.browser.select('paymentmethod', "{0}".format(
+                10 if balance_type == 'repurchase' else 12
+            ))  # repurchase balance
+
+            self.browser.find_by_xpath("//*[@class='btn']").click()
 
     def calc_account_balance(self):
         time.sleep(1)
@@ -334,7 +377,7 @@ class Entry(object):
 
         print("Elem Text: {}".format(elem.text))
 
-        self.account_balance = float(elem.text[1:])
+        self.account_balance = Decimal(elem.text[1:])
 
         print("Available Account Balance: {}".format(self.account_balance))
 
@@ -371,7 +414,9 @@ class Entry(object):
         button.click()
 
 
-def main(conf, surf=False, buy_pack=False, stay_up=False, surf_amount=10):
+def main(conf, surf=False, buy_pack=False, stay_up=False, surf_amount=10,
+         pack_value=2
+         ):
     config = ConfigParser.ConfigParser()
     config.read(conf)
     username = config.get('login', 'username')
@@ -386,7 +431,7 @@ def main(conf, surf=False, buy_pack=False, stay_up=False, surf_amount=10):
         e.login()
 
         if buy_pack:
-            e.buy_pack()
+            e.buy_pack(pack_value)
 
         if surf:
             e.view_ads(surf_amount)
