@@ -1,13 +1,10 @@
 #!/usr/bin/env python
 
 
-from __future__ import print_function
-
 # Core
-import collections
+from __future__ import print_function
 from decimal import *
-getcontext().prec = 2
-getcontext().rounding = ROUND_DOWN
+
 from functools import wraps
 import logging
 import math
@@ -35,6 +32,12 @@ import selenium.webdriver.support.ui as ui
 
 # Local
 
+# Begin code
+
+getcontext().prec = 2
+getcontext().rounding = ROUND_DOWN
+
+
 logging.basicConfig(
     format='%(lineno)s - %(message)s',
     level=logging.INFO
@@ -52,7 +55,8 @@ action_path = dict(
     dashboard='dashboard.php',
     repurchase_balance_transfer='balance_transfer.php',
     purchase_balance_transfer='pbalance_transfer.php',
-    buy_pack='purchase.php'
+    buy_pack='purchase.php',
+    withdraw='cashout.php'
 )
 
 one_minute = 60
@@ -219,12 +223,18 @@ class Entry(object):
         self.browser.find_by_xpath("//input[@value='LOGIN']").click()
 
 
-        print("Waiting for login ad...")
-        link_elem = wait_visible(self.browser.driver, "//div[@class='closeButton']", timeout=15)
-        print("link elem={0}".format(link_elem))
-        if link_elem:
-            time.sleep(3)
-            link_elem.click()
+        found = True
+        while found:
+            print("Waiting for login ad...")
+            link_elem = wait_visible(self.browser.driver, "//div[@class='closeButton']/a", timeout=15)
+            print("link elem={0}".format(link_elem))
+            if link_elem:
+                time.sleep(3)
+                link_elem.click()
+                found = True
+            else:
+                found = False
+
 
         self.collect_stats()
 
@@ -253,22 +263,17 @@ class Entry(object):
                 result = self.view_ad()
                 if result == 0:
                     break
-
         self.browser_visit('dashboard')
 
     @trap_alert
     def view_ad(self):
-
         ads = self.browser.find_by_xpath('//td[text()="Bonus"]')
         print(ads)
         ads[3].click()
         self.browser.driver.switch_to_window(self.browser.driver.window_handles[-1])
-        time.sleep(30)
-        time.sleep(random.randrange(5,10))
         elem = wait_visible(self.browser.driver, '//a[text()="Close"]')
         elem.click()
         self.browser.driver.switch_to_window(self.browser.driver.window_handles[0])
-
         return 0
 
     def wait_on_ad(self):
@@ -278,6 +283,10 @@ class Entry(object):
 
     def collect_stats(self):
         self.browser_visit('dashboard')
+
+        ad_pack_elem = self.browser.find_by_xpath("//p[@class='number-pack']")
+        ad_packs = int(ad_pack_elem.text)
+
         main_account_balance_elem = self.browser.find_by_xpath("//p[@style='font-size:41px;']")
         main_account_balance = Decimal(main_account_balance_elem.text[1:])
         account_balance_elem = self.browser.find_by_xpath("//div[@class='account-blance']")
@@ -286,7 +295,7 @@ class Entry(object):
         floating_point_regexp = re.compile('\d+\.\d+')
         main, purchase, repurchase = [Decimal(f) for f in floating_point_regexp.findall(account_balance_text)]
         self._balance = dict(
-            main=main, purchase=purchase, repurchase=repurchase,
+            main=main, purchase=purchase, repurchase=repurchase, ad_packs=ad_packs
         )
         pp = pprint.PrettyPrinter(indent=4)
         pp.pprint(self._balance)
@@ -322,13 +331,20 @@ class Entry(object):
             purchase_balance_elem.click()
 
         self.browser.find_by_name("amount").type(
-            self._balance['main'][0:-1]
+            str(self._balance['main'])[0:-1]
         )
         self.browser.find_by_xpath('//input[@class="btn"]').click()
         self.collect_stats()
 
+    def withdraw(self):
+        self.browser_visit('withdraw')
+
+        loop_forever()
+
+
+
     def buy_pack(self, pack_value=2):
-        self.optimize_balance(pack_value)
+        # self.optimize_balance(pack_value)
 
         pack_value_to_option = {
             1: 2,
@@ -352,6 +368,8 @@ class Entry(object):
                     balance_type, self._balance[balance_type], pack_value
                 ))
                 continue
+            else:
+                print("Using {0} balance to buy packs.".format(balance_type))
 
             packs_to_buy = self.packs_to_purchase(self._balance[balance_type], pack_value)
 
@@ -363,6 +381,7 @@ class Entry(object):
             ))  # repurchase balance
 
             self.browser.find_by_xpath("//*[@class='btn']").click()
+            self.collect_stats()
 
     def calc_account_balance(self):
         time.sleep(1)
@@ -414,14 +433,18 @@ class Entry(object):
         button.click()
 
 
-def main(conf, surf=False, buy_pack=False, stay_up=False, surf_amount=10,
-         pack_value=2
+def main(conf,
+         surf=False, buy_pack=False, stay_up=False, withdraw=False,
+         surf_amount=10, pack_value=2, random_delay=False
          ):
     config = ConfigParser.ConfigParser()
     config.read(conf)
     username = config.get('login', 'username')
     password = config.get('login', 'password')
     pin = config.get('login', 'pin')
+
+    if random_delay:
+        time.sleep(random.randrange(5, 16) * one_minute)
 
     with Browser() as browser:
         browser.driver.set_window_size(1200, 1100)
@@ -435,6 +458,9 @@ def main(conf, surf=False, buy_pack=False, stay_up=False, surf_amount=10,
 
         if surf:
             e.view_ads(surf_amount)
+
+        if withdraw:
+            e.withdraw()
 
         if stay_up:
             loop_forever()

@@ -2,4 +2,4 @@
 
 cat login.ini
 
-./main.py login.ini  --surf --surf-amount 11 --stay-up
+./main.py login.ini --buy-pack --surf --stay-up
