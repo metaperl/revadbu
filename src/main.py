@@ -447,8 +447,11 @@ def main(conf,
         time.sleep(random.randrange(5, 16) * one_minute)
 
     with Browser() as browser:
+
         browser.driver.set_window_size(1200, 1100)
         browser.driver.set_window_position(600, 0)
+        browser.driver.set_page_load_timeout(40)
+
         e = Entry(username, password, pin, browser)
 
         e.login()
